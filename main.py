@@ -6,7 +6,7 @@ load_dotenv()
 
 # 2. Validate API keys
 required_keys = [
-    "OPENAI_API_KEY",
+    "GROQ_API_KEY",
     "FREECRYPTO_TOKEN",
     "NEWSAPI_KEY"
 ]
