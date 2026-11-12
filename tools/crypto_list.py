@@ -1,75 +1,45 @@
-
 import os
-import json
-from dotenv import load_dotenv
+
 import requests
-from dotenv import load_dotenv
 from langchain_core.tools import tool
 
-load_dotenv()
+from tools.utils import error_json, http_get_json, to_json, ttl_cache
+
+API_URL = "https://api.freecryptoapi.com/v1/getCryptoList"
+
+
+@ttl_cache(seconds=600)
+def fetch_crypto_list(token: str) -> list:
+    data = http_get_json(API_URL, headers={"Authorization": f"Bearer {token}"})
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        found = data.get("data") or data.get("result") or data.get("cryptocurrencies") or []
+        return found if isinstance(found, list) else []
+    return []
+
+
 @tool
 def crypto_list_tool(limit: int = 25) -> str:
-    """
-    Retrieve a list of cryptocurrencies from FreeCryptoAPI.
-    Returns cryptocurrency symbols and names as JSON.
+    """Retrieve a list of cryptocurrencies (symbol and name) from FreeCryptoAPI.
+
+    Args:
+        limit: Maximum number of cryptocurrencies to return (1-200).
     """
     token = os.getenv("FREECRYPTO_TOKEN")
-
     if not token:
-        return json.dumps({"error": "FREECRYPTO_TOKEN is missing"})
-
-    url = "https://api.freecryptoapi.com/v1/getCryptoList"
-
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
-
+        return error_json("FREECRYPTO_TOKEN is missing")
+    limit = max(1, min(int(limit), 200))
     try:
-        response = requests.get(
-            url,
-            headers=headers,
-            timeout=30
-        )
-
-        response.raise_for_status()
-        data = response.json()
-
-        # Normalize the API response
-        if isinstance(data, list):
-            cryptocurrencies = data
-        elif isinstance(data, dict):
-            cryptocurrencies = (
-                data.get("data")
-                or data.get("result")
-                or data.get("cryptocurrencies")
-                or []
-            )
-        else:
-            cryptocurrencies = []
-
-        if not isinstance(cryptocurrencies, list):
-            return json.dumps(data)
-
-        result = []
-
-        for coin in cryptocurrencies[:limit]:
-            if isinstance(coin, dict):
-                result.append({
-                    "symbol": (
-                        coin.get("symbol")
-                        or coin.get("Symbol")
-                        or coin.get("ticker")
-                    ),
-                    "name": (
-                        coin.get("name")
-                        or coin.get("Name")
-                    )
-                })
-
-        return json.dumps(result, indent=2)
-
+        coins = fetch_crypto_list(token)
     except requests.exceptions.RequestException as e:
-        return json.dumps({"error": str(e)})
+        return error_json(str(e))
 
-    except ValueError:
-        return json.dumps({"error": "Invalid JSON response from API"})
+    result = []
+    for coin in coins[:limit]:
+        if isinstance(coin, dict):
+            result.append({
+                "symbol": coin.get("symbol") or coin.get("Symbol") or coin.get("ticker"),
+                "name": coin.get("name") or coin.get("Name"),
+            })
+    return to_json(result)

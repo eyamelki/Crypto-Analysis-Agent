@@ -1,70 +1,46 @@
 import os
-import json
-from dotenv import load_dotenv
-from newsapi import NewsApiClient
-from langchain_core.tools import tool
 
-load_dotenv()
+from langchain_core.tools import tool
+from newsapi import NewsApiClient
+
+from tools.utils import error_json, to_json, ttl_cache
+
+
+@ttl_cache(seconds=300)
+def fetch_news(query: str, max_items: int, api_key: str) -> dict:
+    client = NewsApiClient(api_key=api_key)
+    return client.get_everything(q=query, language="en", sort_by="publishedAt",
+                                 page=1, page_size=max_items)
 
 
 @tool
 def crypto_news_tool(query: str, max_items: int = 5) -> str:
-    """
-    Search recent cryptocurrency news using NewsAPI.
+    """Search recent cryptocurrency news (NewsAPI).
 
     Args:
-        query: Search keywords, such as bitcoin or ethereum.
-        max_items: Maximum number of articles to return.
-
-    Returns:
-        A JSON string containing article titles, sources, URLs
-        and publication dates.
+        query: Search keywords in English, such as 'bitcoin' or 'ethereum ETF'.
+        max_items: Maximum number of articles to return (1-20).
     """
     api_key = os.getenv("NEWSAPI_KEY")
-
     if not api_key:
-        return json.dumps({
-            "status": False,
-            "error": "NEWSAPI_KEY is missing"
-        })
-
+        return error_json("NEWSAPI_KEY is missing")
+    max_items = max(1, min(int(max_items), 20))
     try:
-        newsapi = NewsApiClient(api_key=api_key)
-
-        max_items = max(1, min(max_items, 100))
-
-        res = newsapi.get_everything(
-            q=query,
-            language="en",
-            sort_by="publishedAt",
-            page=1,
-            page_size=max_items
-        )
-
+        res = fetch_news(query, max_items, api_key)
         articles = []
-
-        for article in res.get("articles", [])[:max_items]:
-            source_info = article.get("source") or {}
-
+        for a in res.get("articles", [])[:max_items]:
             articles.append({
-                "title": article.get("title"),
-                "source": source_info.get("name"),
-                "url": article.get("url"),
-                "publishedAt": article.get("publishedAt"),
-                "description": article.get("description")
+                "title": a.get("title"),
+                "source": (a.get("source") or {}).get("name"),
+                "url": a.get("url"),
+                "publishedAt": a.get("publishedAt"),
+                "description": a.get("description"),
             })
-
-        result = {
+        return to_json({
             "status": res.get("status") == "ok",
             "totalResults": res.get("totalResults", 0),
             "returned": len(articles),
-            "articles": articles
-        }
-
-        return json.dumps(result, indent=2)
-
-    except Exception as e:
-        return json.dumps({
-            "status": False,
-            "error": str(e)
+            "articles": articles,
         })
+    except Exception as e:
+        return error_json(str(e))
